@@ -6,6 +6,7 @@ import os
 from parser import *
 from prompt import *
 from dotenv import load_dotenv
+from type_agent import *
 
 load_dotenv()
 
@@ -23,11 +24,6 @@ conversations = {}
 slither_report = None
 solidity_code = None
 
-class ReasonedAnalysis(Model):
-    vulnerabilities: list
-    reasoning: str
-    suggestions: list
-
 @audit_agent.on_rest_post("/message", AuditReport, ReasonedAnalysis)
 async def handle_post(ctx: Context, req: AuditReport) -> ReasonedAnalysis:
     ctx.logger.info("📩 Received Solidity audit request")
@@ -40,7 +36,6 @@ async def handle_post(ctx: Context, req: AuditReport) -> ReasonedAnalysis:
         AuditReport(
             slither=slither_report if isinstance(slither_report, str) else json.dumps(slither_report),
             solidity=solidity_code,
-            user="vscode_audit_request" 
         ),
         response_type=ReasonedAnalysis
     )
@@ -54,85 +49,6 @@ async def handle_post(ctx: Context, req: AuditReport) -> ReasonedAnalysis:
     return reply
 
 
-@chat_protocol.on_message(model=ChatMessage)
-async def handle_chat(ctx: Context, sender: str, msg: ChatMessage):
-    global slither_report, solidity_code
-    ctx.logger.info(audit_agent)
-    try:
-        ctx.storage.set("last_chat_sender", sender)
-        ctx.logger.info(f"💾 Chat sender enregistré (storage) : {sender}")
-    except Exception as e:
-        ctx.logger.warning(f"⚠️ Impossible d’enregistrer dans storage, fallback mémoire: {e}")
-        conversations["last_chat"] = sender
-        ctx.logger.info(f"💾 Chat sender enregistré (mémoire) : {sender}")
-
-    texts = [c.text for c in msg.content if hasattr(c, "text")]
-    ctx.logger.info(f"Chat message received : {msg.content}")
-
-    if texts:
-        for text in texts:
-            ctx.logger.info(f"💬 Message received : {text}")
-            json = None
-            conv = conversations.setdefault(sender, [])
-
-            while json == None :
-                completion = client.chat.completions.create(
-                    model="asi1-mini",
-                    messages= ON_MESSAGE(text),
-                )
-
-                plan = completion.choices[0].message.content
-                ctx.logger.info(plan)
-
-                try:
-                    json = get_json_from_message(plan)
-                except Exception as e:
-                    ctx.logger.error(f"Erreur parsing JSON: {e}")
-                    json = None
-
-            ctx.logger.info("json trouvé")
-
-            if json["json"] != None :
-                slither_report = json["json"]
-
-            if json["solidity"] != None :
-                solidity_code = json["solidity"]
-
-            if solidity_code == None or slither_report == None:
-                completion = client.chat.completions.create(
-                        model="asi1-mini",
-                        messages= failed_launch(json, text)
-                    )
-                response = completion.choices[0].message.content
-                await ctx.send(sender, ChatMessage(content=[TextContent(text=response)]))
-
-            
-            else :
-                try:
-                    ctx.logger.info("🚀 Rapport complet détecté, envoi à ReasonerAgent...")
-
-                    await ctx.send(
-                        "agent1qgtf9zhyyeu7clzzxpyr5au4ru37vgywlppekm3q0ruf9n9c8jhmue93cd6",
-                        AuditReport(
-                            slither=slither_report if isinstance(slither_report, str) else json.dumps(slither_report),
-                            solidity=solidity_code,
-                            user=text  # ou json_data.get("question", text)
-                        )
-                    )
-
-                    ctx.logger.info("✅ AuditReport envoyé à SlitherPro !")
-                except Exception as e:
-                    ctx.logger.error("Erreur lors de l'envoie au Reasoner")
-                    await ctx.send(sender, ChatMessage(content=[TextContent(text=f"Erreur lors de l’envoi à l’agent : {e}")]))
-
-            
-
-    else:
-        ctx.logger.info("📦 Non-text message received or empty.")
-    
-@chat_protocol.on_message(model=ChatAcknowledgement)
-async def handle_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
-    ctx.logger.info(f"✅ Ack reçu du chat : {msg.status}")
 
 @audit_agent.on_message(model=ReasonedAnalysis)
 async def handle_reasoned_analysis(ctx: Context, sender: str, msg: ReasonedAnalysis):
@@ -181,9 +97,6 @@ async def handle_reasoned_analysis(ctx: Context, sender: str, msg: ReasonedAnaly
 
     await ctx.send(chat_target, ChatMessage(content=[TextContent(text=response_text)]))
 
-@chat_protocol.on_message(model=ChatAcknowledgement)
-async def handle_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
-    ctx.logger.info(f"✅ Ack reçu du chat : {msg.status}")
 
 audit_agent.include(chat_protocol)
 

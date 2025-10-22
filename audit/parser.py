@@ -4,11 +4,6 @@ from dataclasses import dataclass
 from typing import List, Optional
 from uagents import Model
 
-class AuditReport(Model):
-    slither: str
-    solidity: str
-    user: str = ""
-
 @dataclass
 class SourceMapping:
     start: int
